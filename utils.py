@@ -583,6 +583,149 @@ def _clustered_bar(explanation, linkage, title, cutoff=1.0):
         plt.barh(y, vals); plt.yticks(y, labels); plt.gca().invert_yaxis()
         plt.xlabel("mean |SHAP| (grouped)"); plt.title(title); plt.tight_layout(); plt.show()
 
+# ============================================================
+# SHAP correlation clustering vs. ground-truth groups
+# ============================================================
+
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
+from scipy.spatial.distance import squareform
+from sklearn.metrics import adjusted_rand_score
+import numpy as np
+import matplotlib.pyplot as plt
+
+def shap_corr_clustering_vs_truth(
+    shap_values,
+    feature_names,
+    groups,
+    title_prefix="",
+    corr_method="pearson",
+    n_thresholds=30,
+):
+    """
+    Compare SHAP-based feature clustering to ground-truth feature groups.
+
+    This function:
+    1. Builds a ground-truth |corr| matrix from known groups.
+    2. Computes a SHAP-based correlation matrix across SHAP columns.
+    3. Converts both to distances D = 1 - |corr|.
+    4. Runs hierarchical clustering on both distance matrices.
+    5. Scans cluster thresholds to compute best Adjusted Rand Index (ARI).
+    6. Plots dendrograms + correlation matrices.
+
+    Parameters
+    ----------
+    shap_values : shap.Explanation or ndarray (n_samples, n_features)
+    feature_names : list of str
+    groups : list of lists of int
+        Example: [[0,1,2], [3,4]]
+    title_prefix : str
+        Optional prefix for dendrogram titles
+    corr_method : {"pearson", "spearman"}
+    n_thresholds : int
+        Number of thresholds to scan for ARI
+
+    Returns
+    -------
+    best_ari : float
+    best_thresh : float
+    """
+
+    # Extract SHAP matrix
+    if hasattr(shap_values, "values"):
+        sv = np.asarray(shap_values.values)
+    else:
+        sv = np.asarray(shap_values)
+
+    sv = np.asarray(sv)
+    assert sv.ndim == 2, "shap_values must be 2D"
+    n_features = sv.shape[1]
+
+    feature_names = list(feature_names)
+    assert len(feature_names) == n_features, "feature_names mismatch"
+
+    # ---- Ground-truth correlation matrix ----
+    C_true = np.eye(n_features)
+    for g in groups:
+        for i in g:
+            for j in g:
+                C_true[i, j] = 1.0
+
+    D_true = 1 - np.abs(C_true)
+    np.fill_diagonal(D_true, 0)
+
+    # ---- SHAP-based correlation matrix ----
+    if corr_method == "spearman":
+        from scipy.stats import spearmanr
+        C_shap, _ = spearmanr(sv, axis=0)
+    else:
+        C_shap = np.corrcoef(sv, rowvar=False)
+
+    C_shap = C_shap[:n_features, :n_features]
+    D_shap = 1 - np.abs(C_shap)
+    np.fill_diagonal(D_shap, 0)
+
+    # ---- Convert to condensed form ----
+    cond_true = squareform(D_true, checks=False)
+    cond_shap = squareform(D_shap, checks=False)
+
+    Z_true = linkage(cond_true, method="average")
+    Z_shap = linkage(cond_shap, method="average")
+
+    # ---- Scan thresholds for best ARI ----
+    max_height = max(Z_true[:, 2].max(), Z_shap[:, 2].max())
+    thresholds = np.linspace(0, max_height, n_thresholds)[1:]  # skip 0
+
+    best_ari = -1
+    best_thresh = None
+
+    for t in thresholds:
+        labels_true = fcluster(Z_true, t, criterion="distance")
+        labels_shap = fcluster(Z_shap, t, criterion="distance")
+        ari = adjusted_rand_score(labels_true, labels_shap)
+        if ari > best_ari:
+            best_ari = ari
+            best_thresh = t
+
+    print(f"Best ARI between ground-truth and SHAP clustering: {best_ari:.3f}")
+    print(f"Threshold at best ARI: {best_thresh:.3f}")
+
+    # ---- Plot dendrograms ----
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
+
+    dendrogram(Z_true, labels=feature_names, ax=axes[0], orientation="top")
+    axes[0].set_title(f"{title_prefix}Ground-truth clustering")
+
+    dendrogram(Z_shap, labels=feature_names, ax=axes[1], orientation="top")
+    axes[1].set_title(f"{title_prefix}SHAP-based clustering")
+
+    plt.tight_layout()
+    plt.show()
+
+    # ---- Plot correlation matrices ----
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(C_true, vmin=-1, vmax=1, cmap="coolwarm")
+    axes[0].set_title("Ground-truth |corr|")
+    axes[0].set_xticks(range(n_features))
+    axes[0].set_yticks(range(n_features))
+    axes[0].set_xticklabels(feature_names, rotation=90)
+    axes[0].set_yticklabels(feature_names)
+
+    im1 = axes[1].imshow(C_shap, vmin=-1, vmax=1, cmap="coolwarm")
+    axes[1].set_title("SHAP-derived corr")
+    axes[1].set_xticks(range(n_features))
+    axes[1].set_yticks(range(n_features))
+    axes[1].set_xticklabels(feature_names, rotation=90)
+    axes[1].set_yticklabels(feature_names)
+
+    plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+    plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+    plt.tight_layout()
+    plt.show()
+
+    return best_ari, best_thresh
+
+
 def scaling_ablation_on_model(
     splits, xcols, *,
     model_kind="SVR-RBF",
@@ -735,7 +878,7 @@ def scaling_ablation_on_model(
 
         except Exception as e:
             print(f"SHAP failed for {model_kind} | {name}: {e}")
-
+    
     # Metrics table
     df_res = pd.DataFrame(results).sort_values("R2", ascending=False)
     print("\n=== Scaling ablation leaderboard (TEST) ===")
