@@ -4,6 +4,7 @@
 import numpy as np, pandas as pd, matplotlib.pyplot as plt
 from math import ceil
 from scipy.ndimage import gaussian_filter
+RNG = 123
 
 # ==== ONE MIXED DATASET: correlated blocks + independent features (spatial maps) ====
 
