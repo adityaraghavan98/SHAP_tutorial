@@ -5,7 +5,19 @@ import numpy as np, pandas as pd, matplotlib.pyplot as plt
 from math import ceil
 from scipy.ndimage import gaussian_filter
 RNG = 123
+# Optional libraries: xgboost and gplearn
+try:
+    from xgboost import XGBRegressor
+    _HAS_XGB = True
+except ImportError:
+    _HAS_XGB = False
 
+try:
+    from gplearn.genetic import SymbolicRegressor
+    _HAS_GPLEARN = True
+except ImportError:
+    _HAS_GPLEARN = False
+    
 # ==== ONE MIXED DATASET: correlated blocks + independent features (spatial maps) ====
 
 
@@ -252,8 +264,10 @@ def build_model_zoo(random_state=RNG):
     except Exception:
         pass
 
-    # --- Symbolic Regression (gplearn) ---
-    if _HAS_GPLEARN:
+   # --- Symbolic Regression (gplearn) ---
+    try:
+        from gplearn.genetic import SymbolicRegressor
+
         # No scaler; it works on raw features. Ensure float64 upstream.
         zoo["SymReg"] = (
             SymbolicRegressor(
@@ -271,7 +285,7 @@ def build_model_zoo(random_state=RNG):
                 max_samples=0.9,
                 n_jobs=-1,
                 verbose=0,
-                random_state=random_state
+                random_state=random_state,
             ),
             {
                 "population_size": [600, 900, 1200, 1500],
@@ -285,10 +299,14 @@ def build_model_zoo(random_state=RNG):
                 "function_set": [
                     ("add","sub","mul","div","sin","cos","sqrt","log"),
                     ("add","sub","mul","div","sin","cos","sqrt"),
-                    ("add","sub","mul","div","sqrt","log")
+                    ("add","sub","mul","div","sqrt","log"),
                 ],
-            }
+            },
         )
+    except ImportError:
+        # gplearn is not installed; skip symbolic regression
+        pass
+
     return zoo
 
 def run_model_search(df, *, feature_prefix="x", ycol="y",
