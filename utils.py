@@ -371,11 +371,24 @@ def plot_best(model, Xte, yte, title="Best model: Predictions vs Truth"):
 def make_Xy(df, feature_prefix="x", ycol="y"):
     """
     Split a DataFrame into (X, y, feature_names).
-    - X: numpy array of features
-    - y: numpy array of target
-    - feature_names: list of feature column names
+
+    feature_prefix can be:
+    - a string prefix (default): "x" selects columns starting with "x"
+    - a list or tuple of specific feature names: ["x0","x3"]
     """
-    xcols = [c for c in df.columns if c.startswith(feature_prefix)]
+    # Case 1: string prefix (existing behavior)
+    if isinstance(feature_prefix, str):
+        xcols = [c for c in df.columns if c.startswith(feature_prefix)]
+
+    # Case 2: explicit list/tuple of feature names
+    elif isinstance(feature_prefix, (list, tuple)):
+        xcols = list(feature_prefix)
+
+    else:
+        raise TypeError(
+            "feature_prefix must be a string prefix or a list/tuple of column names."
+        )
+
     X = df[xcols].to_numpy(dtype=float)
     y = df[ycol].to_numpy(dtype=float)
     return X, y, xcols
