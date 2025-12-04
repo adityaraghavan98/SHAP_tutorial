@@ -312,9 +312,13 @@ def build_model_zoo(random_state=RNG):
 def run_model_search(df, *, feature_prefix="x", ycol="y",
                      test_size=0.2, random_state=RNG,
                      cv_splits=5, n_iter=40, per_model_n_iter=None,
-                     n_jobs=-1, verbose=1):
+                     n_jobs=-1, verbose=1,
+                     model_names=None):
     """
     per_model_n_iter: optional dict like {"SymReg": 15, "MLP": 50} to override n_iter per model.
+    model_names: optional iterable of model names (keys from build_model_zoo())
+                 to restrict which models are evaluated. If None, all models
+                 in the zoo are used.
     """
     X, y, xcols = make_Xy(df, feature_prefix, ycol)
     # gplearn prefers float64
@@ -327,14 +331,26 @@ def run_model_search(df, *, feature_prefix="x", ycol="y",
     cv = KFold(n_splits=cv_splits, shuffle=True, random_state=random_state)
     zoo = build_model_zoo(random_state=random_state)
 
+    # 🔹 NEW: optionally restrict to a subset of models
+    if model_names is not None:
+        model_names = list(model_names)
+        zoo = {name: zoo[name] for name in model_names if name in zoo}
+
     results, best_models = [], {}
 
     for name, (estimator, param_dist) in zoo.items():
         this_iter = per_model_n_iter.get(name, n_iter) if per_model_n_iter else n_iter
 
         rs = RandomizedSearchCV(
-            estimator, param_distributions=param_dist, n_iter=this_iter, cv=cv,
-            scoring="r2", n_jobs=n_jobs, random_state=random_state, verbose=verbose, refit=True
+            estimator,
+            param_distributions=param_dist,
+            n_iter=this_iter,
+            cv=cv,
+            scoring="r2",
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            refit=True,
         )
         rs.fit(Xtr, ytr)
 
@@ -344,10 +360,14 @@ def run_model_search(df, *, feature_prefix="x", ycol="y",
         results.append(s)
         best_models[name] = rs.best_estimator_
 
-        print(f"\n{name}: best CV R2={rs.best_score_:.3f} | TEST {{'R2':{s['R2']:.3f}, 'RMSE':{s['RMSE']:.3f}, 'MAE':{s['MAE']:.3f}}}")
+        print(
+            f"\n{name}: best CV R2={rs.best_score_:.3f} | TEST "
+            f"{{'R2':{s['R2']:.3f}, 'RMSE':{s['RMSE']:.3f}, 'MAE':{s['MAE']:.3f}}}"
+        )
 
     leaderboard = pd.DataFrame(results).sort_values("R2", ascending=False).reset_index(drop=True)
     return leaderboard, best_models, (Xtr, Xte, ytr, yte), xcols
+
 
 def _scores(y_true, y_pred):
     from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
