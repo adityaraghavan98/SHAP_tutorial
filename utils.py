@@ -546,13 +546,25 @@ def shap_best_for_all(best_models, splits, xcols, *, nsamples_kernel=100, do_clu
                 plt.title(f"{name} — SHAP summary (TreeExplainer)"); plt.tight_layout(); plt.show()
 
             else:
-                # SVR, KNN, MLP, SymReg → KernelExplainer (black-box, independent assumption)
-                f = _predict_fn(model, scaler=scaler)
-                bg = Xtr if len(Xtr) <= 200 else Xtr[np.random.choice(len(Xtr), 200, replace=False)]
+                # SVR, KNN, MLP, SymReg → treat as black-box models
+                # Use the *full* estimator's predict (est may already include scaling, e.g., a Pipeline)
+                f = est.predict
+    
+                # Use a summarized background for KernelExplainer to keep it reasonably fast
+                if len(Xtr) <= 200:
+                    bg = Xtr
+                else:
+                    idx_bg = np.random.choice(len(Xtr), 200, replace=False)
+                    bg = Xtr[idx_bg]
+    
                 explainer = shap.KernelExplainer(f, bg)
                 sv = explainer.shap_values(Xte, nsamples=nsamples_kernel)
+    
                 shap.summary_plot(sv, Xte, feature_names=xcols, show=False)
-                plt.title(f"{name} — SHAP summary (KernelExplainer)"); plt.tight_layout(); plt.show()
+                plt.title(f"{name} — SHAP summary (KernelExplainer)")
+                plt.tight_layout()
+                plt.show()
+
 
             # Clustered bar (optional)
             if do_clustered_bar:
